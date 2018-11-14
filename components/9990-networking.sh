@@ -112,29 +112,52 @@ do_netsetup ()
 			devlist="$devlist $device"
 		done
 
-		for dev in $devlist ; do
-			param="$(get_ipconfig_para $dev)"
-			if [ -n "$NODHCP" ] && [ "$param" = "$dev" ] ; then
-				echo "Ignoring network device $dev due to nodhcp." | tee -a /boot.log
-				continue
-			fi
-			echo "Executing ipconfig -t $ETHDEV_TIMEOUT $param"
-			ipconfig -t "$ETHDEV_TIMEOUT" "$param" | tee -a /netboot.config
-
-			# if configuration of device worked we should have an assigned
-			# IP address, if so let's use the device as $DEVICE for later usage.
-			# simple and primitive approach which seems to work fine
-
-			IPV4ADDR="0.0.0.0"
-			if [ -e "/run/net-${device}.conf" ]; then
-				. /run/net-${device}.conf
-			fi
-			if [ "${IPV4ADDR}" != "0.0.0.0" ]; then
-				export DEVICE="$dev $DEVICE"
-				# break  # exit loop as we just use the irst
+		my_ethdev_timeout="$ETHDEV_TIMEOUT"
+		max_ethdev_timeout="$((ETHDEV_TIMEOUT*100))"	# this even works in dash, but still maybe not POSIX
+		while :	# we use "break" to exit the loop
+		do
+			for dev in $devlist ; do
+				param="$(get_ipconfig_para $dev)"
+				if [ -n "$NODHCP" ] && [ "$param" = "$dev" ] ; then
+					echo "Ignoring network device $dev due to nodhcp." | tee -a /boot.log
+					continue
+				fi
+				echo "Executing ipconfig -t $my_ethdev_timeout $param"
+				ipconfig -t "$my_ethdev_timeout" "$param" | tee -a /netboot.config
+	
+				# if configuration of device worked we should have an assigned
+				# IP address, if so let's use the device as $DEVICE for later usage.
+				# simple and primitive approach which seems to work fine
+	
+				IPV4ADDR="0.0.0.0"
+				if [ -e "/run/net-${device}.conf" ]; then
+					. /run/net-${device}.conf
+				fi
+				if [ "${IPV4ADDR}" != "0.0.0.0" ]; then
+					export DEVICE="$dev $DEVICE"
+					# break  # exit loop as we just use the irst
+				fi
+			done
+			# try to see whether we can reach the ROOTSERVER now; if not, retry with larger timeouts, up to a limit.
+			# TODO: make sure this also handles cifs and http cases
+			if [ -z "$ROOTSERVER" ]; then
+				break	# no route needed
+			elif ip route get "$ROOTSERVER" >/dev/null 2>/dev/null; then
+				break	# we have a route towards the server we're to boot from
+			elif [ "$my_ethdev_timeout" = "$max_ethdev_timeout" ]
+			then # maximum timeout reached
+				echo "Network configuration appears unsuccessful; we don't have a route towards $ROOTSERVER despite numerous attempts. Giving up and trying to continue regardless." | tee -a /boot.log
+				break
+			else # try again, with a larger timeout
+				echo "Network configuration appears unsuccessful; we don't have a route towards $ROTOSERVER. Increasing timeout and retrying (will give up once timeout exceeds $max_ethdev_timeout)." | tee -a /boot.log
+				my_ethdev_timeout=$((2*my_ethdev_timeout))
+				if [ "$my_ethdev_timeout" -gt "$max_ethdev_timeout" ]
+				then
+					my_ethdev_timeout="$max_ethdev_timeout"
+				fi
 			fi
 		done
-	unset devlist
+	unset devlist my_ethdev_timeout max_ethdev_timeout
 
 	for interface in ${DEVICE}
 	do

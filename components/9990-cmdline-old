@@ -153,6 +153,11 @@ Cmdline_old ()
 				export NFS_COW
 				;;
 
+			nfsroot=*)
+				NFSROOT="${_PARAMETER#nfsroot=}"
+				export NFSROOT
+				;;
+
 			nodhcphostname)
 				NODHCPHOSTNAME="Yes"
 				export NODHCPHOSTNAME
@@ -281,6 +286,22 @@ Cmdline_old ()
 		fi
 	fi
 
+	if [ -z "${ROOTSERVER}" ] && [ -n "${NFSROOT%%:*}" ]
+	# If ROOTSERVER is unset,
+	# and NFSROOT contains a server IP
+	# (which has to come before the first colon),
+	then
+		# set ROOTSERVER to the IP of the server from NFSROOT
+		ROOTSERVER="${NFSROOT%%:*}"
+		export ROOTSERVER
+		if [ -z "$ROOTPATH" ]
+		# set ROOTPATH too while we're at it
+		then
+			ROOTPATH="${NFSROOT#*:}"
+			export ROOTPATH
+		fi
+	fi
+	
 	if [ -z "${MODULE}" ]
 	then
 		MODULE="filesystem"
